@@ -1,6 +1,8 @@
 package com.mam.lambo.jsvirzi.simplecameratoh264;
 
+import android.Manifest;
 import android.content.Context;
+import android.content.pm.PackageManager;
 import android.graphics.ImageFormat;
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCaptureSession;
@@ -13,6 +15,7 @@ import android.media.ImageReader;
 import android.media.MediaCodec;
 import android.media.MediaCodecInfo;
 import android.media.MediaFormat;
+import android.support.v4.app.ActivityCompat;
 import android.util.Log;
 import android.view.Surface;
 
@@ -35,7 +38,7 @@ public class SimpleCameraModule {
     private static final int MaxImages = 8;
     private static final int ImageWidth = 1920;
     private static final int ImageHeight = 1080;
-    private static final int FrameRate = 15;
+    private static final int FrameRate = 10;
     private static final int BitRate = 6000000;
     public static Context context = null;
     private String cameraId;
@@ -172,10 +175,13 @@ public class SimpleCameraModule {
             imageReader = ImageReader.newInstance(ImageWidth, ImageHeight, ImageFormat.JPEG, MaxImages);
             imageReader.setOnImageAvailableListener(onImageAvailableListener, null);
             surfaces[SurfaceJpeg] = imageReader.getSurface();
+//            surfaces[SurfaceJpeg] = null; // TODO
 
             List<Surface> surfaceList = new LinkedList<>();
             for (int i = 0; i < surfaces.length; i++) {
-                surfaceList.add(surfaces[i]);
+                if (surfaces[i] != null) {
+                    surfaceList.add(surfaces[i]);
+                }
             }
             device = cameraDevice;
             try {
@@ -188,12 +194,16 @@ public class SimpleCameraModule {
                         captureSession = session;
 
                         try {
-                            captureRequestBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_RECORD);
+                            captureRequestBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
                             int mode = captureRequestBuilder.get(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE);
                             captureRequestBuilder.set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON);
                             captureRequestBuilder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON);
+                            long frameDuration = 1000000000L / FrameRate;
+                            captureRequestBuilder.set(CaptureRequest.SENSOR_FRAME_DURATION, frameDuration);
                             for (int i = 0; i < surfaces.length; i++) {
-                                captureRequestBuilder.addTarget(surfaces[i]);
+                                if (surfaces[i] != null) {
+                                    captureRequestBuilder.addTarget(surfaces[i]);
+                                }
                             }
                             session.setRepeatingRequest(captureRequestBuilder.build(), captureCallback, null);
                         } catch (CameraAccessException ex) {
