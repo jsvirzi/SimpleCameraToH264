@@ -8,6 +8,8 @@ import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraDevice;
 import android.hardware.camera2.CameraManager;
 import android.hardware.camera2.CaptureRequest;
+import android.media.Image;
+import android.media.ImageReader;
 import android.media.MediaCodec;
 import android.media.MediaCodecInfo;
 import android.media.MediaFormat;
@@ -29,16 +31,28 @@ public class SimpleCameraModule {
     static MediaFormat mediaFormat;
     static MediaFormat outputMediaFormat;
     private static final int IFrameInterval = 5;
-    static private MediaCodec encoder;
+    private MediaCodec encoder;
+    private static final int MaxImages = 8;
     private static final int ImageWidth = 1920;
     private static final int ImageHeight = 1080;
     private static final int FrameRate = 15;
     private static final int BitRate = 6000000;
-    private static Context context = null;
+    public static Context context = null;
     private String cameraId;
     CameraCaptureSession captureSession = null;
     private CameraDevice device = null;
-    private Surface surface = null;
+    private final int SurfaceH264 = 0;
+    private final int SurfaceJpeg = 1;
+    private final int MaxSurfaces = 2;
+    private Surface[] surfaces = new Surface[MaxSurfaces];
+    private ImageReader imageReader = null;
+    private int frameCounter = 0;
+    private long lastJpegTime = 0;
+    private long lastH264Time = 0;
+
+    public static void setApplicationContext(Context applicationContext) {
+        context = applicationContext;
+    }
 
     public SimpleCameraModule(Context context, String cameraId) {
         this.context = context;
@@ -99,7 +113,7 @@ public class SimpleCameraModule {
         try {
             encoder.setCallback(mediaCodecCallback);
             encoder.configure(mediaFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
-            surface = encoder.createInputSurface();
+            surfaces[SurfaceH264] = encoder.createInputSurface();
             encoder.start();
         } catch (MediaCodec.CodecException ex) {
             Log.e(TAG, "MediaCodec exception caught. resetting...");
@@ -109,7 +123,7 @@ public class SimpleCameraModule {
 
     }
 
-    private static MediaCodec.Callback mediaCodecCallback = new MediaCodec.Callback() {
+    private MediaCodec.Callback mediaCodecCallback = new MediaCodec.Callback() {
 
         @Override
         public void onInputBufferAvailable(MediaCodec codec, int index) {
@@ -118,7 +132,11 @@ public class SimpleCameraModule {
 
         @Override
         public void onOutputBufferAvailable(MediaCodec codec, int index, MediaCodec.BufferInfo info) {
-            Log.d(TAG, "onOutputBufferAvailable() called");
+            final long now = System.currentTimeMillis();
+            long timeBetweenFrames = now - lastH264Time;
+            lastH264Time = now;
+            String msg = String.format("%s onOutputBufferAvailable() called. deltaT = %dms", cameraId, timeBetweenFrames);
+            Log.d(TAG, msg);
             codec.releaseOutputBuffer(index, false);
         }
 
@@ -151,11 +169,17 @@ public class SimpleCameraModule {
                 ex.printStackTrace();
             }
 
-            List<Surface> surfaces = new LinkedList<>();
-            surfaces.add(surface);
+            imageReader = ImageReader.newInstance(ImageWidth, ImageHeight, ImageFormat.JPEG, MaxImages);
+            imageReader.setOnImageAvailableListener(onImageAvailableListener, null);
+            surfaces[SurfaceJpeg] = imageReader.getSurface();
+
+            List<Surface> surfaceList = new LinkedList<>();
+            for (int i = 0; i < surfaces.length; i++) {
+                surfaceList.add(surfaces[i]);
+            }
             device = cameraDevice;
             try {
-                cameraDevice.createCaptureSession(surfaces, new CameraCaptureSession.StateCallback() {
+                cameraDevice.createCaptureSession(surfaceList, new CameraCaptureSession.StateCallback() {
 
                     @Override
                     public void onConfigured(CameraCaptureSession session) {
@@ -168,7 +192,9 @@ public class SimpleCameraModule {
                             int mode = captureRequestBuilder.get(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE);
                             captureRequestBuilder.set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON);
                             captureRequestBuilder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON);
-                            captureRequestBuilder.addTarget(surface);
+                            for (int i = 0; i < surfaces.length; i++) {
+                                captureRequestBuilder.addTarget(surfaces[i]);
+                            }
                             session.setRepeatingRequest(captureRequestBuilder.build(), captureCallback, null);
                         } catch (CameraAccessException ex) {
                             ex.printStackTrace();
@@ -222,5 +248,58 @@ public class SimpleCameraModule {
             }
         }
     };
+
+    private final ImageReader.OnImageAvailableListener onImageAvailableListener =
+        new ImageReader.OnImageAvailableListener() {
+
+        @Override
+        public void onImageAvailable(ImageReader imageReader) {
+            final long start0 = System.currentTimeMillis();
+            Image image = imageReader.acquireLatestImage();
+            String msg;
+            if (image != null) {
+                Image.Plane[] planes = image.getPlanes();
+                ByteBuffer byteBuffer = planes[0].getBuffer();
+                final int jpegSize = byteBuffer.limit();
+                long timestamp = image.getTimestamp();
+                image.close();
+                ++frameCounter;
+                long delta0 = System.currentTimeMillis() - start0;
+                long timeBetweenFrames = (timestamp - lastJpegTime) / 1000000L; // convert to millisecs
+                lastJpegTime = timestamp;
+                msg = String.format("%s image processing time = %dms. jpeg size = %d. deltat = %dms",
+                    cameraId, delta0, jpegSize, timeBetweenFrames);
+                Log.d(TAG, msg);
+            }
+        }
+    };
+
+    public static String getCameraId(String identifier) {
+        CameraManager cameraManager = (CameraManager) context.getSystemService(Context.CAMERA_SERVICE);
+        String[] cameraIdList;
+        try {
+            cameraIdList = cameraManager.getCameraIdList();
+        } catch (CameraAccessException ex) {
+            ex.printStackTrace();
+            return null;
+        }
+
+        for (final String cameraId : cameraIdList) {
+            CameraCharacteristics characteristics;
+            try {
+                characteristics = cameraManager.getCameraCharacteristics(cameraId);
+            } catch (CameraAccessException ex) {
+                ex.printStackTrace();
+                return null;
+            }
+            int cameraOrientation = characteristics.get(CameraCharacteristics.LENS_FACING);
+            if (cameraOrientation == CameraCharacteristics.LENS_FACING_FRONT && identifier.equals("internal")) {
+                return cameraId;
+            } else if (cameraOrientation == CameraCharacteristics.LENS_FACING_BACK && identifier.equals("external")) {
+                return cameraId;
+            }
+        }
+        return null;
+    }
 
 }
