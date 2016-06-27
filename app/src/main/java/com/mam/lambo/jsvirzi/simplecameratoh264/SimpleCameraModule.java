@@ -10,6 +10,7 @@ import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraDevice;
 import android.hardware.camera2.CameraManager;
 import android.hardware.camera2.CaptureRequest;
+import android.hardware.camera2.TotalCaptureResult;
 import android.media.Image;
 import android.media.ImageReader;
 import android.media.MediaCodec;
@@ -165,47 +166,51 @@ public class SimpleCameraModule {
         public void onOpened(final CameraDevice cameraDevice) {
             CameraManager cameraManager = (CameraManager) context.getSystemService(Context.CAMERA_SERVICE);
 
-            try {
-                CameraCharacteristics cameraCharacteristics = cameraManager.getCameraCharacteristics(cameraDevice.getId());
-                int[] modes = cameraCharacteristics.get(CameraCharacteristics.CONTROL_AVAILABLE_VIDEO_STABILIZATION_MODES);
-            } catch (CameraAccessException ex) {
-                ex.printStackTrace();
-            }
+            device = cameraDevice;
 
             imageReader = ImageReader.newInstance(ImageWidth, ImageHeight, ImageFormat.JPEG, MaxImages);
             imageReader.setOnImageAvailableListener(onImageAvailableListener, null);
             surfaces[SurfaceJpeg] = imageReader.getSurface();
-//            surfaces[SurfaceJpeg] = null; // TODO
 
+            List<Surface> surfaceListH264 = new LinkedList<>();
+            surfaceListH264.add(surfaces[SurfaceH264]);
+            List<Surface> surfaceListJpeg = new LinkedList<>();
+            surfaceListJpeg.add(surfaces[SurfaceJpeg]);
             List<Surface> surfaceList = new LinkedList<>();
-            for (int i = 0; i < surfaces.length; i++) {
-                if (surfaces[i] != null) {
-                    surfaceList.add(surfaces[i]);
-                }
-            }
-            device = cameraDevice;
+            surfaceList.add(surfaces[SurfaceH264]);
+            surfaceList.add(surfaces[SurfaceJpeg]);
+
             try {
                 cameraDevice.createCaptureSession(surfaceList, new CameraCaptureSession.StateCallback() {
 
                     @Override
                     public void onConfigured(CameraCaptureSession session) {
-                        CameraCaptureSession.CaptureCallback captureCallback = null;
-                        CaptureRequest.Builder captureRequestBuilder = null;
+                        CameraCaptureSession.CaptureCallback captureCallback = new CameraCaptureSession.CaptureCallback() {
+                            @Override
+                            public void onCaptureCompleted(CameraCaptureSession session, CaptureRequest request, TotalCaptureResult result) {
+                                try {
+                                    session.capture(request, this, null);
+                                } catch (CameraAccessException ex) {
+                                    ex.printStackTrace();
+                                }
+                            }
+                        };
                         captureSession = session;
 
                         try {
-                            captureRequestBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
-                            int mode = captureRequestBuilder.get(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE);
-                            captureRequestBuilder.set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON);
-                            captureRequestBuilder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON);
-                            long frameDuration = 1000000000L / FrameRate;
-                            captureRequestBuilder.set(CaptureRequest.SENSOR_FRAME_DURATION, frameDuration);
-                            for (int i = 0; i < surfaces.length; i++) {
-                                if (surfaces[i] != null) {
-                                    captureRequestBuilder.addTarget(surfaces[i]);
-                                }
-                            }
-                            session.setRepeatingRequest(captureRequestBuilder.build(), captureCallback, null);
+                            CaptureRequest.Builder captureRequestBuilderH264 = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
+                            captureRequestBuilderH264.set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON);
+                            captureRequestBuilderH264.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON);
+                            captureRequestBuilderH264.addTarget(surfaces[SurfaceH264]);
+                            session.setRepeatingRequest(captureRequestBuilderH264.build(), captureCallback, null);
+
+                            CaptureRequest.Builder captureRequestBuilderJpeg = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_RECORD);
+//                            captureRequestBuilderJpeg.set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON);
+//                            captureRequestBuilderJpeg.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON);
+//                            captureRequestBuilderJpeg.addTarget(surfaces[SurfaceH264]);
+                            captureRequestBuilderJpeg.addTarget(surfaces[SurfaceJpeg]);
+                            session.capture(captureRequestBuilderJpeg.build(), captureCallback, null);
+
                         } catch (CameraAccessException ex) {
                             ex.printStackTrace();
                         }
@@ -223,6 +228,7 @@ public class SimpleCameraModule {
             } catch (CameraAccessException ex) {
                 ex.printStackTrace();
             }
+
         }
 
         @Override
