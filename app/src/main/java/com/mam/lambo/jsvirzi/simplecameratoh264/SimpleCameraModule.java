@@ -39,7 +39,7 @@ public class SimpleCameraModule {
     private static final int MaxImages = 8;
     private static final int ImageWidth = 1920;
     private static final int ImageHeight = 1080;
-    private static final int FrameRate = 10;
+    private static final int FrameRate = 30;
     private static final int BitRate = 6000000;
     public static Context context = null;
     private String cameraId;
@@ -161,6 +161,17 @@ public class SimpleCameraModule {
         }
     };
 
+    CameraCaptureSession.CaptureCallback captureCallbackJpeg = new CameraCaptureSession.CaptureCallback() {
+        @Override
+        public void onCaptureCompleted(CameraCaptureSession session, CaptureRequest request, TotalCaptureResult result) {
+            try {
+                session.capture(request, this, null);
+            } catch (CameraAccessException ex) {
+                ex.printStackTrace();
+            }
+        }
+    };
+
     private final CameraDevice.StateCallback cameraStateCallback = new CameraDevice.StateCallback() {
         @Override
         public void onOpened(final CameraDevice cameraDevice) {
@@ -185,16 +196,7 @@ public class SimpleCameraModule {
 
                     @Override
                     public void onConfigured(CameraCaptureSession session) {
-                        CameraCaptureSession.CaptureCallback captureCallback = new CameraCaptureSession.CaptureCallback() {
-                            @Override
-                            public void onCaptureCompleted(CameraCaptureSession session, CaptureRequest request, TotalCaptureResult result) {
-                                try {
-                                    session.capture(request, this, null);
-                                } catch (CameraAccessException ex) {
-                                    ex.printStackTrace();
-                                }
-                            }
-                        };
+                        CameraCaptureSession.CaptureCallback captureCallbackH264 = null;
                         captureSession = session;
 
                         try {
@@ -202,14 +204,14 @@ public class SimpleCameraModule {
                             captureRequestBuilderH264.set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON);
                             captureRequestBuilderH264.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON);
                             captureRequestBuilderH264.addTarget(surfaces[SurfaceH264]);
-                            session.setRepeatingRequest(captureRequestBuilderH264.build(), captureCallback, null);
+                            session.setRepeatingRequest(captureRequestBuilderH264.build(), captureCallbackH264, null);
 
                             CaptureRequest.Builder captureRequestBuilderJpeg = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_RECORD);
 //                            captureRequestBuilderJpeg.set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON);
 //                            captureRequestBuilderJpeg.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON);
 //                            captureRequestBuilderJpeg.addTarget(surfaces[SurfaceH264]);
                             captureRequestBuilderJpeg.addTarget(surfaces[SurfaceJpeg]);
-                            session.capture(captureRequestBuilderJpeg.build(), captureCallback, null);
+                            session.capture(captureRequestBuilderJpeg.build(), captureCallbackJpeg, null);
 
                         } catch (CameraAccessException ex) {
                             ex.printStackTrace();
