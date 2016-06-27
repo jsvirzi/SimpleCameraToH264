@@ -18,13 +18,18 @@ public class MainActivity extends AppCompatActivity {
         Toolbar toolbar = (Toolbar) findViewById(R.id.toolbar);
         setSupportActionBar(toolbar);
 
-        final SimpleCameraModule cameraModule = new SimpleCameraModule(this, "0");
+        SimpleCameraModule.setApplicationContext(this);
+        String externalCameraId = SimpleCameraModule.getCameraId("external");
+        String internalCameraId = SimpleCameraModule.getCameraId("internal");
+        final SimpleCameraModule externalCamera = new SimpleCameraModule(this, externalCameraId);
+        final SimpleCameraModule internalCamera = new SimpleCameraModule(this, internalCameraId);
 
         FloatingActionButton fab = (FloatingActionButton) findViewById(R.id.fab);
         fab.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
-                cameraModule.release();
+                externalCamera.release();
+                internalCamera.release();
                 Process.killProcess(Process.myPid());
             }
         });
